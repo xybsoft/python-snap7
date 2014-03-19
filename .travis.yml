@@ -1,20 +1,17 @@
-language: python
+language:
+ - objective-c
+ - python
 python:
   - '2.7'
 before_install:
-  - sudo apt-get update -qq
-  - sudo apt-get install software-properties-common
-  - sudo add-apt-repository -y ppa:gijzelaar/snap7
-  - sudo apt-get update -qq
-  - sudo apt-get install libsnap7-dev libsnap71
-  - sudo ldconfig
+  - brew update
+  - brew install snap7 python
   - pip install -r test/requirements.txt --use-mirrors
 install:
-  - python setup.py install
+  - sudo python setup.py install
 script:
-  - sudo /home/travis/virtualenv/python2.7/bin/nosetests test/test_partner.py
-  - sudo /home/travis/virtualenv/python2.7/bin/nosetests test/test_server.py
-  - nohup sudo /home/travis/virtualenv/python2.7/bin/snap7-server.py &
+  - sudo nosetests test/test_partner.py
+  - sudo nosetests test/test_server.py
+  - nohup sudo snap7/bin/snap7-server.py &
   - nosetests test/test_client.py
-
 
