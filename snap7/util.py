@@ -10,6 +10,7 @@ see test code test_s7util
 from collections import OrderedDict
 import struct
 import logging
+from snap7 import six
 
 
 def parse_specification(db_specification):
@@ -112,7 +113,10 @@ def set_string(_bytearray, byte_index, value):
     :params value: string data
     :params size: total possible string size
     """
-    assert isinstance(value, (str, unicode))
+    if six.PY2:
+        assert isinstance(value, (str, unicode))
+    else:
+        assert isinstance(value, str)
     # set len count
     _bytearray[byte_index + 1] = len(value)
     i = 0
@@ -136,13 +140,13 @@ def get_string(_bytearray, byte_index):
 
 def get_dword(_bytearray, byte_index):
     data = _bytearray[byte_index:byte_index + 4]
-    dword = struct.unpack('I', struct.pack('4B', *data))[0]
+    dword = struct.unpack('>I', struct.pack('4B', *data))[0]
     return dword
 
 
 def set_dword(_bytearray, byte_index, dword):
     dword = int(dword)
-    _bytes = struct.unpack('4B', struct.pack('I', dword))
+    _bytes = struct.unpack('4B', struct.pack('>I', dword))
     for i, b in enumerate(_bytes):
         _bytearray[byte_index + i] = b
 
@@ -205,7 +209,6 @@ class DB(object):
             if key and key in self.index:
                 msg = '%s not unique!' % key
                 logging.error(msg)
-                print msg
             self.index[key] = row
 
     def __getitem__(self, key, default=None):
