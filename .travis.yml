@@ -12,7 +12,6 @@ install:
 script:
   - sudo nosetests test/test_partner.py
   - nosetests test/test_server.py
-  - nohup snap7/bin/snap7-server.py &
   - nosetests test/test_client.py
 
 
