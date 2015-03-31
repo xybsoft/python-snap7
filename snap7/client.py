@@ -2,12 +2,16 @@
 Snap7 client used for connection to a siemens7 server.
 """
 import re
-from ctypes import c_int, c_char_p, byref, sizeof, c_uint16, c_int32, c_byte, c_void_p
+from ctypes import c_int, c_char_p, byref, sizeof, c_uint16, c_int32, c_byte
+from ctypes import c_void_p
+
 import logging
 
 import snap7
 from snap7 import six
-from snap7.snap7types import S7Object, buffer_type, buffer_size, BlocksList, param_types
+from snap7.snap7types import S7Object, buffer_type, buffer_size, BlocksList
+from snap7.snap7types import TS7BlockInfo, param_types, cpu_statuses
+
 from snap7.common import check_error, load_library, ipv4
 from snap7.snap7exceptions import Snap7Exception
 
@@ -66,6 +70,24 @@ class Client(object):
         """
         logger.info("hot starting plc")
         return self.library.Cli_PlcColdStart(self.pointer)
+
+    def get_cpu_state(self):
+        """
+        Retrieves CPU state from client
+        """
+        state = c_int(0)
+        self.library.Cli_GetPlcStatus(self.pointer,byref(state))
+        
+        try:
+            status_string = cpu_statuses[state.value]
+        except KeyError:
+            status_string = None
+        
+        if not status_string:
+            raise Snap7Exception("The cpu state (%s) is invalid" % state.value)
+        
+        logging.debug("CPU state is %s" % status_string)
+        return status_string
 
     @error_wrap
     def disconnect(self):
@@ -228,6 +250,17 @@ class Client(object):
         return self.library.Cli_WriteArea(self.pointer, area, dbnumber, start,
                                           size, wordlen, byref(cdata))
 
+    def read_multi_vars(self, items):
+        """This function read multiple variables from the PLC.
+
+        :param items: list of S7DataItem objects
+        :returns: a tuple with the return code and a list of data items
+        """
+        result = self.library.Cli_ReadMultiVars(self.pointer, byref(items),
+                                                c_int32(len(items)))
+        check_error(result, context="client")
+        return result, items
+
     def list_blocks(self):
         """Returns the AG blocks amount divided by type.
 
@@ -242,8 +275,15 @@ class Client(object):
 
     def list_blocks_of_type(self, blocktype, size):
         """This function returns the AG list of a specified block type."""
+
+        blocktype = snap7.snap7types.block_types.get(blocktype)
+
+        if not blocktype:
+            raise Snap7Exception("The blocktype parameter was invalid")
+
         logging.debug("listing blocks of type: %s size: %s" %
                       (blocktype, size))
+
         data = (c_int * 10)()
         count = c_int(size)
         result = self.library.Cli_ListBlocksOfType(
@@ -252,6 +292,26 @@ class Client(object):
             byref(count))
 
         logging.debug("number of items found: %s" % count)
+
+        check_error(result, context="client")
+        return data
+
+    def get_block_info(self, blocktype, db_number):
+        """Returns the block information for the specified block."""
+
+        blocktype = snap7.snap7types.block_types.get(blocktype)
+
+        if not blocktype:
+            raise Snap7Exception("The blocktype parameter was invalid")
+
+        logging.debug("retrieving block info for block %s of type %s" %
+                      (db_number, blocktype))
+
+        data = TS7BlockInfo()
+
+        result = self.library.Cli_GetAgBlockInfo(
+            self.pointer, blocktype,
+            db_number, byref(data))
         check_error(result, context="client")
         return data
 

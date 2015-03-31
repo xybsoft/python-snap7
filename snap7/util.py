@@ -1,9 +1,85 @@
 """
-Utility functions to work with DB objects
+This module contains utility functions for working with PLC DB objects.
+There are functions to work with the raw bytearray data snap7 functions return
+In order to work with this data you need to make python able to work with the
+PLC bytearray data.
 
-example:
+For example code see test_util.py and example.py in the example folder.
 
-see test code test_s7util
+
+example::
+
+    spec/DB layout
+
+    # Byte index    Variable name  Datatype
+    layout=\"\"\"
+    4	          ID             INT
+    6             NAME	         STRING[6]
+
+    12.0          testbool1      BOOL
+    12.1          testbool2      BOOL
+    12.2          testbool3      BOOL
+    12.3          testbool4      BOOL
+    12.4          testbool5      BOOL
+    12.5          testbool6      BOOL
+    12.6          testbool7      BOOL
+    12.7          testbool8      BOOL
+    13            testReal       REAL
+    17            testDword      DWORD
+    \"\"\"
+
+    client = snap7.client.Client()
+    client.connect('192.168.200.24', 0, 3)
+
+    # this looks confusing but this means uploading from the PLC to YOU
+    # so downloading in the PC world :)
+
+    all_data = client.upload(db_number)
+
+    simple:
+
+    db1 = snap7.util.DB(
+        db_number,              # the db we use
+        all_data,               # bytearray from the plc
+        layout,                 # layout specification DB variable data
+                                # A DB specification is the specification of a
+                                # DB object in the PLC you can find it using
+                                # the dataview option on a DB object in PCS7
+
+        17+2,                   # size of the specification 17 is start
+                                # of last value
+                                # which is a DWORD which is 2 bytes,
+
+        1,                      # number of row's / specifications
+
+        id_field='ID',          # field we can use to identify a row.
+                                # default index is used
+        layout_offset=4,        # sometimes specification does not start a 0
+                                # like in our example
+        db_offset=0             # At which point in 'all_data' should we start
+                                # reading. if could be that the specification
+                                # does not start at 0
+    )
+
+    Now we can use db1 in python as a dict. if 'ID' contains
+    the 'test' we can identify the 'test' row in the all_data bytearray
+
+    To test of you layout matches the data from the plc you can
+    just print db1[0] or db['test'] in the example
+
+    db1['test']['testbool1'] = 0
+
+    If we do not specify a id_field this should work to read out the
+    same data.
+
+    db1[0]['testbool1']
+
+    to read and write a single Row from the plc. takes like 5ms!
+
+    db1['test'].write()
+
+    db1['test'].read()
+
 
 """
 
@@ -11,22 +87,9 @@ from collections import OrderedDict
 import struct
 import logging
 from snap7 import six
+import re
 
-
-def parse_specification(db_specification):
-    """
-    create a db specification derived from a
-    dataview of a db in which the byte layout
-    is specified
-    """
-    parsed_db_specification = OrderedDict()
-    for line in db_specification.split('\n'):
-        if line and not line.startswith('#'):
-            row = line.split('#')[0]  # remove trailing comment
-            index, var_name, _type = row.split()
-            parsed_db_specification[var_name] = (index, _type)
-
-    return parsed_db_specification
+logger = logging.getLogger(__name__)
 
 
 def get_bool(_bytearray, byte_index, bool_index):
@@ -106,19 +169,25 @@ def get_real(_bytearray, byte_index):
     return real
 
 
-def set_string(_bytearray, byte_index, value):
+def set_string(_bytearray, byte_index, value, max_size):
     """
     Set string value
 
     :params value: string data
-    :params size: total possible string size
+    :params max_size: max possible string size
     """
     if six.PY2:
         assert isinstance(value, (str, unicode))
     else:
         assert isinstance(value, str)
-    # set len count
+
+    size = len(value)
+    # FAIL HARD WHEN trying to write too much data into PLC
+    if size > max_size:
+        raise ValueError('size %s > max_size %s %s' % (size, max_size, value))
+    # set len count on first position
     _bytearray[byte_index + 1] = len(value)
+
     i = 0
     # fill array which chr integers
     for i, c in enumerate(value):
@@ -129,11 +198,17 @@ def set_string(_bytearray, byte_index, value):
         _bytearray[byte_index + 2 + r] = ord(' ')
 
 
-def get_string(_bytearray, byte_index):
+def get_string(_bytearray, byte_index, max_size):
     """
     parse string from bytearray
     """
     size = _bytearray[byte_index + 1]
+
+    if max_size < size:
+        logging.error("the string is to big for the size encountered in specification")
+        logging.error("WRONG SIZED STRING ENCOUNTERED")
+        size = max_size
+
     data = map(chr, _bytearray[byte_index + 2:byte_index + 2 + size])
     return "".join(data)
 
@@ -151,10 +226,35 @@ def set_dword(_bytearray, byte_index, dword):
         _bytearray[byte_index + i] = b
 
 
+def parse_specification(db_specification):
+    """
+    Create a db specification derived from a
+    dataview of a db in which the byte layout
+    is specified
+    """
+    parsed_db_specification = OrderedDict()
+
+    for line in db_specification.split('\n'):
+        if line and not line.startswith('#'):
+            row = line.split('#')[0]  # remove trailing comment
+            index, var_name, _type = row.split()
+            parsed_db_specification[var_name] = (index, _type)
+
+    return parsed_db_specification
+
+
 class DB(object):
     """
-    provide a simple API for a DB bytearray block given a row
-    specification
+    Manage a DB bytearray block given a specification
+    of the Layout.
+
+    It is possible to have many repetitive instances of
+    a specification this is called a "row".
+
+    probably most usecases there is just one row
+
+    db1[0]['testbool1'] = test
+    db1.write()   # puts data in plc
     """
     _bytearray = None      # data from plc
     specification = None   # layout of db rows
@@ -308,7 +408,9 @@ class DB_Row(object):
         byte_index = self.get_offset(byte_index)
 
         if _type.startswith('STRING'):
-            return get_string(_bytearray, byte_index)
+            max_size = re.search('\d+', _type).group(0)
+            max_size = int(max_size)
+            return get_string(_bytearray, byte_index, max_size)
 
         if _type == 'REAL':
             return get_real(_bytearray, byte_index)
@@ -332,7 +434,9 @@ class DB_Row(object):
         byte_index = self.get_offset(byte_index)
 
         if _type.startswith('STRING'):
-            return set_string(_bytearray, byte_index, value)
+            max_size = re.search('\d+', _type).group(0)
+            max_size = int(max_size)
+            return set_string(_bytearray, byte_index, value, max_size)
 
         if _type == 'REAL':
             return set_real(_bytearray, byte_index, value)
