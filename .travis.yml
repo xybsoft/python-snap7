@@ -1,14 +1,12 @@
+os:
+  - linux
+  - osx
 language: python
 python:
-  - '2.7'
-  - '3.4'
+  - 2.7
+  - 3.4
 before_install:
-  - sudo apt-get update -qq
-  - sudo apt-get install software-properties-common python-nose
-  - sudo add-apt-repository -y ppa:gijzelaar/snap7
-  - sudo apt-get update -qq
-  - sudo apt-get install libsnap7-dev libsnap71
-  - sudo ldconfig
+  - travis-deps.sh
   - pip install -r test/requirements.txt --use-mirrors
 install:
   - python setup.py install
@@ -24,3 +22,10 @@ notifications:
     on_success: change
     on_failure: always
     on_start: false
+deploy:
+  provider: pypi
+  user: gijzelaerr
+  password:
+    secure: TIIVgCj4hU9KP3Ku0kqq3++1YQDq+B7RCubg/iXZoFpUFSeFaK4G7WJtN5TCs+iyBQYjO7e/RST3PAFq13Ru66CqmlJ3ImCfIzJaZZ1oG5j6qmaTKiYnXqMGd8nMXCn6gc7CvI2q6OOUFSIrDRsFbo35BglX/8NUH525HX0t8xE=
+  on:
+    tags: true
