@@ -6,7 +6,7 @@ python:
   - 2.7
   - 3.4
 before_install:
-  - travis-deps.sh
+  - ./travis-deps.sh
   - pip install -r test/requirements.txt --use-mirrors
 install:
   - python setup.py install
